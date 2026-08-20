@@ -74,6 +74,16 @@ resource "aws_subnet" "privatesubnet2" {
   }
 }
 
+resource "aws_db_subnet_group" "rds-group" {
+  name = "shopflow-rds-group"
+  subnet_ids = [aws_subnet.privatesubnet1.id, aws_subnet.privatesubnet2.id]
+}
+
+resource "aws_elasticache_subnet_group" "elasticache" {
+  name = "shopflow-elasticache-group"
+  subnet_ids = [aws_subnet.privatesubnet1.id, aws_subnet.privatesubnet2.id]
+}
+
 resource "aws_nat_gateway" "nat-gw" {
   subnet_id = aws_subnet.publicsubnet1.id
   allocation_id = aws_eip.nat-eip.id
@@ -115,6 +125,9 @@ resource "aws_security_group" "alb-sg" {
   vpc_id      = aws_vpc.main.id
   name_prefix = "public-app-sg"
   description = "Allow public web traffic"
+  tags = {
+    Name = "ALB-SG"
+  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "allow_http" {
@@ -124,7 +137,6 @@ resource "aws_vpc_security_group_ingress_rule" "allow_http" {
   ip_protocol       = "tcp"
   to_port           = 80
 }
-
 
 resource "aws_vpc_security_group_ingress_rule" "allow_https" {
   security_group_id = aws_security_group.alb-sg.id
@@ -157,6 +169,9 @@ resource "aws_security_group" "ecs-sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  tags = {
+    Name = "ECS-SG"
+  }
 }
 
 
@@ -170,6 +185,9 @@ resource "aws_security_group" "rds_sg" {
     protocol        = "tcp"
     security_groups = [aws_security_group.ecs-sg.id]
   }
+  tags = {
+    Name = "RDS-SG"
+  }
 }
 
 resource "aws_security_group" "cache-sg" {
@@ -181,6 +199,9 @@ resource "aws_security_group" "cache-sg" {
     to_port         = 6379
     protocol        = "tcp"
     security_groups = [aws_security_group.ecs-sg.id]
+  }
+  tags = {
+    Name = "Cache-SG"
   }
 }
 

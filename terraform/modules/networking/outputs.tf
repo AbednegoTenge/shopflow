@@ -6,3 +6,5 @@ output "ecs_sg_id"           { value = aws_security_group.ecs-sg.id }
 output "rds_sg_id"           { value = aws_security_group.rds_sg.id }
 output "cache_sg_id"         { value = aws_security_group.cache-sg.id }
 output "kms_key_arn"         { value = aws_kms_key.main.arn }
+output "db_subnet_group_name"          { value = aws_db_subnet_group.rds-group.name }
+output "elasticache_subnet_group_name" { value = aws_elasticache_subnet_group.elasticache.name }
