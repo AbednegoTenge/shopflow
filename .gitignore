@@ -1,0 +1,48 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+*.tfplan
+
+# AWS
+.aws/
+*.pem
+*.pfx
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Node (if your app is Node)
+node_modules/
+npm-debug.log*
+dist/
+
+# Python (if your app is Python)
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Lambda packaging
+worker/*.zip
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
