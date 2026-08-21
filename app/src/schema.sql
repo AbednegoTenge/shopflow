@@ -1,5 +1,5 @@
 -- schema.sql
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
   id          SERIAL PRIMARY KEY,
   customer_id VARCHAR(64) NOT NULL,
   item        VARCHAR(255) NOT NULL,
