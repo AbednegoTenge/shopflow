@@ -1,5 +1,6 @@
 const { getPool } = require('../db.js')
 const { getCache } = require('../cache.js')
+const { publishOrderCreated } = require('../events.js')
 
 const ORDER_CACHE_TTL_SECONDS = 60
 const ORDERS_LIST_CACHE_KEY = 'orders:latest'
@@ -37,8 +38,14 @@ const addOrder = async (req, res) => {
         'INSERT INTO orders (customer_id, item, quantity) VALUES ($1, $2, $3) RETURNING id',
         [req.body.customer_id, req.body.item, req.body.quantity]
         );
+        const orderId = result.rows[0].id;
         await cacheDel(ORDERS_LIST_CACHE_KEY);
-        res.status(201).json({ orderId: result.rows[0].id });
+        try {
+            await publishOrderCreated(orderId);
+        } catch (err) {
+            console.error('Failed to publish OrderCreated event:', err);
+        }
+        res.status(201).json({ orderId });
   } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to create order' });

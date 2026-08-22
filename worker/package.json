@@ -1,11 +1,9 @@
 {
-  "name": "app",
+  "name": "worker",
   "version": "1.0.0",
   "description": "",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --env-file=.env server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -13,10 +11,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@aws-sdk/client-eventbridge": "^3.1116.0",
     "@aws-sdk/client-secrets-manager": "^3.1115.0",
-    "express": "^5.2.1",
-    "pg": "^8.23.0",
-    "redis": "^6.2.1"
+    "pg": "^8.23.0"
   }
 }

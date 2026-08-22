@@ -26,3 +26,13 @@ module "compute" {
   rds_secret_arn      = module.data.db_secret_arn
   redis_endpoint      = module.data.redis_primary_endpoint
 }
+
+# environments/dev/main.tf — add this
+module "async" {
+  source             = "../../modules/async"
+  vpc_id             = module.networking.vpc_id
+  private_subnet_ids = module.networking.private_subnet_ids
+  rds_sg_id          = module.networking.rds_sg_id
+  rds_endpoint       = module.data.db_endpoint
+  rds_secret_arn     = module.data.db_secret_arn
+}

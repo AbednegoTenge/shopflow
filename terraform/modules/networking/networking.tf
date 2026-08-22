@@ -179,15 +179,17 @@ resource "aws_security_group" "rds_sg" {
   vpc_id      = aws_vpc.main.id
   name_prefix = "private-app-sg"
   description = "Allow traffic from ecs sg"
-  ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs-sg.id]
-  }
   tags = {
     Name = "RDS-SG"
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "rds_from_ecs" {
+  security_group_id            = aws_security_group.rds_sg.id
+  referenced_security_group_id = aws_security_group.ecs-sg.id
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
 }
 
 resource "aws_security_group" "cache-sg" {

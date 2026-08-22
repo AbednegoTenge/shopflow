@@ -12,8 +12,8 @@ shopflow/
 │   ├── modules/
 │   │   ├── networking/     # Phase 1 — done
 │   │   ├── data/            # Phase 2 — done
-│   │   ├── compute/         # Phase 3 — in progress
-│   │   ├── async/            # Phase 4 — not started
+│   │   ├── compute/         # Phase 3 — done
+│   │   ├── async/            # Phase 4 — done
 │   │   └── edge/              # Phase 5 — not started
 │   └── environments/
 │       └── dev/
@@ -37,6 +37,9 @@ shopflow/
 - **Secrets:** RDS uses `manage_master_user_password = true` (AWS-managed rotation via Secrets Manager) rather than a hardcoded password anywhere.
 - **Tags:** `Name = "ShopFlow-<resource>"` on everything.
 - **Git:** annotated tags per completed phase (`git tag -a phase-1-networking -m "..."`), `push.followTags` enabled so `git push` carries commits + tags together.
+- **Module file layout:** within `compute` and `async`, resources are split into per-concern files (`ecr.tf`, `alb.tf`, `ecs.tf`, `autoscaling.tf`, `logs.tf`, `sqs.tf`, `eventbridge.tf`, `lambda.tf`, plus `iam.tf`/`variables.tf`/`outputs.tf` in each) rather than one monolithic `<module>.tf` — Terraform merges everything in the directory regardless, this is purely for readability.
+- **Cross-module IAM avoids hard dependencies where possible:** the ECS task role's `events:PutEvents` permission (needed to publish `OrderCreated`) is scoped to the default event bus ARN built from `data.aws_caller_identity.current.account_id` in `compute/iam.tf`, rather than `compute` taking an output from `async` — keeps the two modules independently applicable.
+- **Security groups must pick one rule style and stick to it:** `alb-sg` and `rds-sg` use standalone `aws_vpc_security_group_ingress_rule`/`egress_rule` resources exclusively; mixing those with the legacy inline `ingress {}`/`egress {}` block on the *same* SG makes Terraform fight itself — the inline block is authoritative over "its" SG's rules and will plan to delete anything a standalone resource added alongside it. `ecs-sg` and `cache-sg` still use the inline style and currently have nothing else targeting them, but convert them the same way before adding any standalone rule against them.
 
 ## Phase status
 
@@ -48,32 +51,41 @@ RDS Postgres, Multi-AZ, `db.t3.micro`, 20GB gp3, encrypted with the shared KMS k
 Verified live: connected via a temporary EC2 instance in the private subnet, reached over SSM Session Manager (IAM role `ssm-test-role` / instance profile `ssm-test-profile`, reused `ecs-sg` as its security group so the test exercises the same path real ECS tasks will use). Confirmed `psql` connects over TLS and `redis-cli PING` returns `PONG`.
 **`orders` table created manually** via `psql -f schema.sql` (columns: id, customer_id, item, quantity, status, created_at). Not yet migrated to a real migration tool (`node-pg-migrate`) — flagged as a Phase 11 polish item, not urgent.
 
-**Phase 3 — Compute: in progress.**
-Terraform designed but not yet fully applied: ECR repo, execution role + task role (task role scoped to `secretsmanager:GetSecretValue` on the specific RDS secret ARN, not `*`), CloudWatch log group, ALB in public subnets with `/health` target group check, ECS Fargate service (`desired_count = 2`, private subnets, no public IP), target-tracking auto scaling on CPU at 60%.
+**Phase 3 — Compute: complete, verified end to end.**
+ECR repo, execution role + task role (task role scoped to `secretsmanager:GetSecretValue` on the specific RDS secret ARN, plus `events:PutEvents` on the default event bus and the `ssmmessages:*` actions ECS Exec needs), CloudWatch log group, ALB in public subnets with `/health` target group check, ECS Fargate service (`desired_count = 2`, private subnets, no public IP, `enable_execute_command = true`), target-tracking auto scaling on CPU at 60%. Task definition runs `runtime_platform { cpu_architecture = "ARM64" }` — Fargate defaults to amd64 and this Mac builds arm64 natively, so ARM64 Fargate was the fix rather than cross-compiling the image.
 
-App code (`app/`) has a known-good structure as of last review:
-- `src/db.js` — owns the `pg` Pool as a module-level singleton, exports `initDb()` and `getPool()`. Pulls DB password from Secrets Manager at startup (`SECRET_ARN` env var), SSL with the RDS CA bundle (`global-bundle.pem`, must be downloaded into the Docker image — not committed to git).
-- `index.js` — registers `/health` and the routes from `src/routes/orderRoutes.js`, only calls `app.listen()` after `initDb()` resolves (so the ALB never routes to a task before its DB pool is ready), exits the process on startup failure so ECS's self-healing can replace the task, handles `SIGTERM` to drain the pool cleanly before ECS kills the container.
-- `src/routes/orderRoutes.js` — `POST /orders`, uses `getPool()` from `db.js`.
+App code (`app/`) real structure:
+- `src/db.js` — `pg` Pool singleton (`initDb()`/`getPool()`), pulls the DB password from Secrets Manager via AWS SDK v3 (`SECRET_ARN` env var), SSL via the RDS CA bundle (`global-bundle.pem`, resolved with `path.join(__dirname, ...)`, fetched at Docker build time, not committed to git).
+- `src/cache.js` — Redis client singleton (`initCache()`/`getCache()`) mirroring `db.js`, connects via `REDIS_HOST`/`REDIS_PORT`, no auth/TLS (matches the replication group's config).
+- `src/events.js` — `EventBridgeClient` singleton, `publishOrderCreated(orderId)` puts a `Source: "shopflow.app"` / `DetailType: "OrderCreated"` event.
+- `server.js` — registers `/health` + the order routes, only calls `app.listen()` after `Promise.all([initDb(), initCache()])` resolves, exits on startup failure, drains both the DB pool and cache client on `SIGTERM`.
+- `src/routes/orderRoutes.js` / `src/controllers/orderController.js` — `POST /orders`, `GET /orders/:id`, `GET /orders`, `DELETE /orders/:id`. Cache-aside on reads (60s TTL), invalidated on write/delete; cache failures are logged and swallowed, never fail the request. `addOrder` publishes an `OrderCreated` event after a successful insert (also swallowed on failure — an order should still succeed even if the async leg can't be reached).
+- `Dockerfile` — 3-stage build (`deps` installs prod deps, `certs` fetches the CA bundle, final stage runs as non-root `appuser` uid/gid 1001).
+- `migrate.js` — reruns `src/schema.sql` (idempotent, `CREATE TABLE IF NOT EXISTS`) against the live DB; the durable, EC2-free way to (re)apply schema — run it via ECS Exec: `aws ecs execute-command --cluster shopflow-cluster --task <arn> --container app --interactive --command "node migrate.js"` (needs a pseudo-TTY if run from a non-interactive shell, e.g. `script -q /dev/null aws ecs execute-command ...`).
 
-**Not yet done for Phase 3:**
-- Dockerfile doesn't exist yet (a minimal `node:20-slim` version was sketched, not committed)
-- No image has been pushed to ECR yet — apply order matters here: create the ECR repo first (`-target`), push an image, *then* apply the rest of the compute module, or the ECS service will spin up tasks that can never pull an image and just retry forever
-- Haven't yet run `terraform apply` on the full compute module or curl-tested the ALB end to end
+Verified live: `curl` through the ALB — `/health` → 200, `POST /orders` → row lands in RDS, `GET /orders/:id` round-trips through the cache correctly.
 
-**Phases 4–11:** not started. Rough plan (see full implementation guide if present in `/docs`): SQS + DLQ + EventBridge + Lambda worker (Phase 4) → CloudFront + WAF + S3 (Phase 5) → GitHub Actions with OIDC, no long-lived AWS keys (Phase 6) → CloudWatch dashboards + alarms + X-Ray (Phase 7) → GuardDuty/Security Hub/Config/VPC Flow Logs hardening pass (Phase 8) → deliberate chaos test with a written postmortem (Phase 9) → cost + Well-Architected review (Phase 10) → README, docs, demo recording (Phase 11).
+**Phase 4 — Async: complete, verified end to end.**
+SQS `orders_queue` (60s visibility timeout, redrive to DLQ after 3 receives) + `orders_dlq` (14-day retention), EventBridge rule `shopflow-order-created` (pattern: `source: shopflow.app`, `detail-type: OrderCreated`) targeting the queue, Lambda worker (`shopflow-order-worker`, Node 20, VPC-attached, own security group with an ingress rule into `rds-sg` on 5432) subscribed via `aws_lambda_event_source_mapping`. Worker (`worker/index.js`) uses AWS SDK v3 for Secrets Manager (matching `app/`), reads its own `global-bundle.pem`/`package.json`/`node_modules` (separate deployable from `app/` — different runtime, different packaging, kept intentionally decoupled). IAM: Lambda's role gets `sqs:ReceiveMessage`/`DeleteMessage`/`GetQueueAttributes` scoped to the queue and `secretsmanager:GetSecretValue` scoped to the RDS secret; nothing broader.
+Verified live: placed a real order, confirmed the Lambda invocation and its log lines in CloudWatch, confirmed `orders.status` flips `pending` → `confirmed`. Then ran the actual DLQ test: temporarily made the worker throw, redeployed, placed an order, watched it fail exactly 3 times at 60s intervals in CloudWatch Logs, confirmed the message (payload intact) landed in `shopflow-orders-dlq` with `ApproximateReceiveCount: 4`, then reverted and confirmed a follow-up order processed normally again.
+
+**Phases 5–11:** not started. Rough plan (see full implementation guide if present in `/docs`): CloudFront + WAF + S3 (Phase 5) → GitHub Actions with OIDC, no long-lived AWS keys (Phase 6) → CloudWatch dashboards + alarms + X-Ray (Phase 7) → GuardDuty/Security Hub/Config/VPC Flow Logs hardening pass (Phase 8) → deliberate chaos test with a written postmortem (Phase 9) → cost + Well-Architected review (Phase 10) → README, docs, demo recording (Phase 11).
+
+**Full destroy/rebuild (2026-08-21/22):** all infra (networking through async) was destroyed mid-Phase-3 to stop idle resources from running up cost, then rebuilt from scratch via staged `-target` applies once Phase 3/4 code was ready. If any resource ID, ARN, or endpoint referenced in older notes/screenshots doesn't match live AWS, trust live AWS — it was rebuilt and current IDs are the ones above (`db_endpoint`, `redis_primary_endpoint`, `alb_dns_name` etc. are all in `terraform output`).
 
 ## Known issues worth remembering
 
 - Region mismatches bit this project twice already (S3 backend bucket, then the DynamoDB lock table) — both from running AWS CLI commands without an explicit `--region` flag while the local CLI default region didn't match the project. CLI default has since been set to `us-east-1`, but stay alert on any command that omits the flag.
 - `aws_vpc_security_group_egress_rule` with `ip_protocol = "-1"` must NOT include `from_port`/`to_port` at all (even `0`/`0`) — the newer standalone SG rule resources reject that combination on `Modify` calls, even though the older inline `ingress {}`/`egress {}` block style tolerates it.
 - RDS engine version wasn't pinned explicitly — currently running Postgres 18 (AWS's current default), which surprised us since the plan had assumed something like 15. Worth deciding whether to pin `engine_version` explicitly rather than floating on AWS's default.
+- Mixing an inline `ingress {}`/`egress {}` block on an `aws_security_group` with a standalone `aws_vpc_security_group_ingress_rule`/`egress_rule` targeting the *same* SG causes a real plan-time landmine: the inline block is authoritative over that SG's rules from Terraform's point of view, so adding a standalone rule alongside it makes the next plan try to delete the standalone-created rule to "reconcile" back to just the inline one — this actually happened to `rds-sg` when `async`'s Lambda ingress rule was added next to the old inline block, and would have silently cut the worker's DB access on the next `apply`. Fixed by converting `rds-sg` to the standalone style and `terraform import`-ing the pre-existing live rule (recreating it via `apply` would have 400'd as a duplicate — AWS already had it from the old inline block).
+- Docker Desktop doesn't restart itself — if `docker build`/`push` fails with `failed to connect to the docker API at unix:///.../docker.sock`, it's just that the daemon isn't running; `open -a Docker` and wait ~10-30s for it to come up.
 
 ## What to do next
 
-Pick up Phase 3: write the Dockerfile, get an image into ECR, run the full `terraform apply` on the compute module, then verify the whole synchronous path (`curl` the ALB `/health`, then `POST /orders`, then confirm the row lands in RDS via the same SSM-based `psql` check used in Phase 2).
+Phases 3 and 4 are both done and verified live. Pick up Phase 5 (edge layer): S3 bucket for static assets/backups, CloudFront in front of the ALB, WAF Web ACL with AWS managed rule groups, optionally Route 53 + ACM for a real domain.
 
-## Phase 3 — Minimal application + compute tier
+## Phase 3 — Minimal application + compute tier (done)
 
 **Build the app (keep it small — see note below):**
 - 3 endpoints: `POST /orders`, `GET /orders/{id}`, `GET /orders`
@@ -100,7 +112,7 @@ docker push <account>.dkr.ecr.<region>.amazonaws.com/shopflow-app:latest
 
 ---
 
-## Phase 4 — Async layer
+## Phase 4 — Async layer (done)
 
 **Build:**
 - SQS queue + a dead-letter queue (DLQ) for messages that fail repeatedly

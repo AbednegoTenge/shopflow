@@ -38,6 +38,21 @@ resource "aws_iam_role_policy" "task_secrets" {
   })
 }
 
+data "aws_caller_identity" "current" {}
+
+resource "aws_iam_role_policy" "task_events" {
+  name = "publish-order-events"
+  role = aws_iam_role.task.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["events:PutEvents"]
+      Resource = "arn:aws:events:us-east-1:${data.aws_caller_identity.current.account_id}:event-bus/default"
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "task_exec" {
   name = "ecs-exec"
   role = aws_iam_role.task.id
