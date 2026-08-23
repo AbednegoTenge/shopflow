@@ -69,6 +69,14 @@ resource "aws_ecs_service" "app" {
       container_port = var.container_port
     }
 
+    # a deploy whose tasks keep failing (e.g. wrong image architecture) rolls
+    # back automatically instead of retrying forever — see CLAUDE.md Phase 6
+    # notes for the incident that motivated this
+    deployment_circuit_breaker {
+      enable   = true
+      rollback = true
+    }
+
     tags = { Name = "ShopFlow-ecs-service" }
 
     depends_on = [aws_lb_listener.http]
