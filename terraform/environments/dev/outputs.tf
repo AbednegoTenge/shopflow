@@ -1,4 +1,3 @@
-# environments/dev/outputs.tf
 
 output "vpc_id" {
   value = module.networking.vpc_id
@@ -82,4 +81,16 @@ output "task_execution_role_arn" {
 
 output "task_role_arn" {
   value = module.compute.task_role_arn
+}
+
+output "cloudfront_domain_name" {
+  value = module.edge.cloudfront_domain_name
+}
+
+output "static_assets_bucket" {
+  value = module.edge.static_assets_bucket
+}
+
+output "backups_bucket" {
+  value = module.edge.backups_bucket
 }

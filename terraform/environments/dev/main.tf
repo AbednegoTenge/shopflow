@@ -1,4 +1,3 @@
-# terraform/environments/dev/main.tf
 
 module "networking" {
   source   = "../../modules/networking"
@@ -14,7 +13,6 @@ module "data" {
   kms_key_arn                   = module.networking.kms_key_arn
 }
 
-# environments/dev/main.tf — add this block
 module "compute" {
   source              = "../../modules/compute"
   vpc_id              = module.networking.vpc_id
@@ -27,7 +25,6 @@ module "compute" {
   redis_endpoint      = module.data.redis_primary_endpoint
 }
 
-# environments/dev/main.tf — add this
 module "async" {
   source             = "../../modules/async"
   vpc_id             = module.networking.vpc_id
@@ -35,4 +32,10 @@ module "async" {
   rds_sg_id          = module.networking.rds_sg_id
   rds_endpoint       = module.data.db_endpoint
   rds_secret_arn     = module.data.db_secret_arn
+}
+
+module "edge" {
+  source       = "../../modules/edge"
+  alb_dns_name = module.compute.alb_dns_name
+  kms_key_arn = module.networking.kms_key_arn
 }
