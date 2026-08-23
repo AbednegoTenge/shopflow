@@ -76,6 +76,14 @@ resource "aws_iam_role_policy" "github_deploy" {
         Effect   = "Allow"
         Action   = ["iam:PassRole"]
         Resource = [var.task_execution_role_arn, var.task_role_arn]
+      },
+      {
+        # workflow's smoke-test step looks up the ALB DNS name post-deploy;
+        # this action doesn't support resource-level permissions
+        Sid      = "SmokeTestALBLookup"
+        Effect   = "Allow"
+        Action   = ["elasticloadbalancing:DescribeLoadBalancers"]
+        Resource = "*"
       }
     ]
   })
