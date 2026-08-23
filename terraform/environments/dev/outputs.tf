@@ -94,3 +94,7 @@ output "static_assets_bucket" {
 output "backups_bucket" {
   value = module.edge.backups_bucket
 }
+
+output "github_deploy_role_arn" {
+  value = module.cicd.deploy_role_arn
+}

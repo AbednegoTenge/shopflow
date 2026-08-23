@@ -41,6 +41,12 @@ resource "aws_ecs_task_definition" "app" {
             }
         }
     ])
+
+    # CI (Phase 6) registers new revisions directly and points the service at them;
+    # this field ignored here so terraform apply doesn't revert deploys back to :latest.
+    lifecycle {
+        ignore_changes = [container_definitions]
+    }
 }
 
 resource "aws_ecs_service" "app" {
@@ -66,4 +72,10 @@ resource "aws_ecs_service" "app" {
     tags = { Name = "ShopFlow-ecs-service" }
 
     depends_on = [aws_lb_listener.http]
+
+    # CI (Phase 6) points this at whatever revision it just registered;
+    # ignored here so terraform apply doesn't revert the running revision.
+    lifecycle {
+        ignore_changes = [task_definition]
+    }
 }

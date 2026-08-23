@@ -14,7 +14,8 @@ shopflow/
 │   │   ├── data/            # Phase 2 — done
 │   │   ├── compute/         # Phase 3 — done
 │   │   ├── async/            # Phase 4 — done
-│   │   └── edge/              # Phase 5 — done
+│   │   ├── edge/              # Phase 5 — done
+│   │   └── cicd/              # Phase 6 — done
 │   └── environments/
 │       └── dev/
 │           ├── backend.tf
@@ -73,7 +74,13 @@ Verified live: placed a real order, confirmed the Lambda invocation and its log 
 S3 `static_assets` bucket (versioned, SSE-KMS with the shared key, public access blocked, read access scoped to CloudFront only via a bucket policy conditioned on `AWS:SourceArn`) and `backups` bucket (same hardening, plus a lifecycle rule transitioning objects to Glacier after 30 days). CloudFront distribution with two origins: S3 via Origin Access Control (`assets/*` path, cached) and the ALB as the default behavior (dynamic API, all HTTP verbs forwarded, TTL=0, viewer protocol redirected to HTTPS — origin to the ALB itself is still HTTP-only since the ALB has no ACM cert yet, consistent with Phase 5's "optional" Route 53/ACM piece not being done). WAFv2 Web ACL (`scope = "CLOUDFRONT"`) with three rules in priority order: `AWSManagedRulesCommonRuleSet`, `AWSManagedRulesSQLiRuleSet`, and a 2000 req/5-min rate-based rule — both managed groups use `override_action { none {} }` so they actually block rather than just count.
 Verified live: `curl` through the CloudFront domain — `/health` → 200, `POST /orders` → 201 and row lands in RDS, `GET /orders/:id` → 200. WAF test: a SQLi-pattern query string (`?id=1' UNION SELECT...` and `?id=1 OR 1=1--`) → 403, normal traffic unaffected.
 
-**Phases 6–11:** not started. Rough plan (see full implementation guide if present in `/docs`): GitHub Actions with OIDC, no long-lived AWS keys (Phase 6) → CloudWatch dashboards + alarms + X-Ray (Phase 7) → GuardDuty/Security Hub/Config/VPC Flow Logs hardening pass (Phase 8) → deliberate chaos test with a written postmortem (Phase 9) → cost + Well-Architected review (Phase 10) → README, docs, demo recording (Phase 11).
+**Phase 6 — CI/CD: complete, not yet exercised by a real push.**
+`cicd` module: `aws_iam_openid_connect_provider` for `token.actions.githubusercontent.com` (imported, not created — the account already had one from before this module existed; its live thumbprint (`ab9d0263244dd0326eb67015705a667e79cfe998`) was pulled via `aws iam get-open-id-connect-provider` and used instead of the commonly-cited-but-stale thumbprint value), and `shopflow-github-deploy-role` — trust policy scoped to `repo:AbednegoTenge/shopflow:ref:refs/heads/main` via the `token.actions.githubusercontent.com:sub` condition (PRs and other branches can't assume it), permissions scoped to: `ecr:GetAuthorizationToken` (`*`, required), ECR push actions scoped to the `shopflow-app` repo ARN, `ecs:RegisterTaskDefinition`/`DescribeTaskDefinition` (`*` — these two actions don't support resource-level permissions, that's not a scoping miss), `ecs:UpdateService`/`DescribeServices` scoped to the one service ARN, and `iam:PassRole` scoped to exactly the two ECS roles (execution + task) — nothing broader.
+`.github/workflows/deploy.yml`: triggers on push to `main` touching `app/**`; assumes the deploy role via OIDC (no stored AWS keys); builds and pushes the image tagged with `github.sha` (never `:latest` — that's the whole point); fetches the *current live* task definition via `describe-task-definition`, patches just the image with `amazon-ecs-render-task-definition`, and registers+deploys the new revision with `amazon-ecs-deploy-task-definition` (`wait-for-service-stability: true`); smoke-tests `/health` through the ALB in a retry loop before considering the deploy successful.
+**Ownership split (the actual point of Phase 6):** Terraform still creates the *first* task definition revision and owns cluster/service/IAM/networking shape; every revision after that is registered by CI directly against the AWS API, bypassing Terraform entirely. Two `lifecycle { ignore_changes = [...] }` blocks make this possible without Terraform fighting CI on the next unrelated `apply`: `aws_ecs_task_definition.app` ignores `container_definitions` (in `compute/ecs.tf`), and `aws_ecs_service.app` ignores `task_definition` — both needed, since the service's `task_definition` argument (which revision is actually running) is a *separate* drift surface from the task definition resource's own `container_definitions` JSON. Real cost of this: since `container_definitions` is a single opaque JSON string, not a keyed object, `ignore_changes` on it means Terraform stops tracking *everything* inside that JSON, not just the image — so future changes to env vars, secrets, or log config made in `ecs.tf` will silently not apply until `ignore_changes` is temporarily removed for one `apply`.
+`terraform apply` for infrastructure stays manual/local, deliberately — no Terraform-apply workflow was added; only the app deploy path is automated. Not yet tested end to end (no push to `main` with an `app/` change has happened since this was wired up) — first real test is the next time `app/` changes and gets pushed.
+
+**Phases 7–11:** not started. Rough plan (see full implementation guide if present in `/docs`): CloudWatch dashboards + alarms + X-Ray (Phase 7) → GuardDuty/Security Hub/Config/VPC Flow Logs hardening pass (Phase 8) → deliberate chaos test with a written postmortem (Phase 9) → cost + Well-Architected review (Phase 10) → README, docs, demo recording (Phase 11).
 
 **Full destroy/rebuild (2026-08-21/22, then again 2026-08-23):** all infra was destroyed mid-Phase-3 to stop idle resources from running up cost, then rebuilt from scratch via staged `-target` applies once Phase 3/4 code was ready. Destroyed and rebuilt a second time on 2026-08-23 once Phase 5 code existed, this time via a full 6-stage sequence: `networking` → `data` → ECR alone → image build/push → rest of `compute` → `async` → `edge`. A `terraform destroy` can leave orphaned state for resources with dependent-object protection (e.g. ECR repos aren't force-deleted by default) — if a resource shows in `terraform state list` but `aws <service> describe-*` 404s, it's orphaned state, not a real resource; `terraform state rm` it before re-applying rather than trying to import or recreate. If any resource ID, ARN, or endpoint referenced in older notes/screenshots doesn't match live AWS, trust live AWS — current IDs are the ones above (`db_endpoint`, `redis_primary_endpoint`, `alb_dns_name`, `cloudfront_domain_name` etc. are all in `terraform output`).
 
@@ -90,7 +97,7 @@ Verified live: `curl` through the CloudFront domain — `/health` → 200, `POST
 
 ## What to do next
 
-Phases 3, 4, and 5 are all done and verified live. Pick up Phase 6 (CI/CD): GitHub OIDC identity provider + deploy role (no long-lived AWS keys in GitHub secrets), a workflow that builds/pushes the image and updates the ECS service on push to `main`, with `terraform apply` kept manual/gated rather than automatic.
+Phases 3 through 6 are done. Phase 6 hasn't been exercised by a real push yet — worth pushing a trivial `app/` change and watching `deploy.yml` run end to end before moving on, per its own test criteria (zero-downtime rolling deploy, no failed requests while curling `/health` in a loop). After that, pick up Phase 7 (observability): CloudWatch dashboard for ALB latency/5xx, ECS CPU/memory, RDS connections, SQS depth; alarms → SNS → email; X-Ray on the ALB and ECS task; explicit log retention on the CloudWatch log group (currently unset — "never expire").
 
 ## Phase 3 — Minimal application + compute tier (done)
 
@@ -143,7 +150,7 @@ docker push <account>.dkr.ecr.<region>.amazonaws.com/shopflow-app:latest
 
 ---
 
-## Phase 6 — CI/CD pipeline
+## Phase 6 — CI/CD pipeline (done)
 
 **Build:**
 - GitHub OIDC identity provider in IAM + a role GitHub Actions can assume (no long-lived AWS access keys stored as GitHub secrets — this is a real security upgrade over most tutorials)

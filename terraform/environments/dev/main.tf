@@ -39,3 +39,14 @@ module "edge" {
   alb_dns_name = module.compute.alb_dns_name
   kms_key_arn = module.networking.kms_key_arn
 }
+
+module "cicd" {
+  source                   = "../../modules/cicd"
+  github_org               = var.github_org
+  github_repo              = var.github_repo
+  ecr_repository_arn       = module.compute.ecr_repository_arn
+  ecs_cluster_arn          = module.compute.ecs_cluster_arn
+  ecs_service_arn          = module.compute.ecs_service_arn
+  task_execution_role_arn  = module.compute.task_execution_role_arn
+  task_role_arn            = module.compute.task_role_arn
+}
