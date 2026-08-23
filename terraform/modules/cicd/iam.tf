@@ -13,11 +13,14 @@ data "aws_iam_policy_document" "github_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # scoped to main only — PRs/other branches can't assume this role
+    # scoped to main only — PRs/other branches can't assume this role.
+    # wildcards tolerate GitHub's immutable-ID suffix on org/repo in the sub
+    # claim (observed live as "AbednegoTenge@<id>/shopflow@<id>", not the
+    # plain "org/repo" form docs usually show) without hardcoding those IDs.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_org}/${var.github_repo}:ref:refs/heads/main"]
+      values   = ["repo:${var.github_org}*/${var.github_repo}*:ref:refs/heads/main"]
     }
   }
 }
