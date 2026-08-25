@@ -29,6 +29,7 @@ resource "aws_lambda_function" "worker" {
     role = aws_iam_role.lambda_worker.arn
     handler = "index.handler"
     runtime = "nodejs20.x"
+    architectures = ["arm64"]
     filename = data.archive_file.worker_zip.output_path
     source_code_hash = data.archive_file.worker_zip.output_base64sha256
     timeout = 10

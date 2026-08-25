@@ -4,7 +4,7 @@ resource "aws_db_instance" "shopflow" {
   identifier = "shopflow-db"
   username = "shopflow_admin"
   engine = "postgres"
-  instance_class = "db.t3.micro"
+  instance_class = "db.t4g.micro"
   manage_master_user_password = true
   multi_az = true
   storage_encrypted = true
