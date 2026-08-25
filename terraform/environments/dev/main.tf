@@ -61,3 +61,8 @@ module "observability" {
   dlq_name                 = module.async.dlq_name
   alert_email              = "abednegotenge180@gmail.com"
 }
+
+module "security" {
+  source = "../../modules/security"
+  vpc_id = module.networking.vpc_id
+}

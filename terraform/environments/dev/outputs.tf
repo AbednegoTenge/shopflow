@@ -98,3 +98,19 @@ output "backups_bucket" {
 output "github_deploy_role_arn" {
   value = module.cicd.deploy_role_arn
 }
+
+output "guardduty_detector_id" {
+  value = module.security.guardduty_detector_id
+}
+
+output "access_analyzer_arn" {
+  value = module.security.access_analyzer_arn
+}
+
+output "flow_log_group_name" {
+  value = module.security.flow_log_group_name
+}
+
+output "config_bucket" {
+  value = module.security.config_bucket
+}
