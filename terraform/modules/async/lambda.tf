@@ -45,6 +45,9 @@ resource "aws_lambda_function" "worker" {
             SECRET_ARN = var.rds_secret_arn
         }
     }
+    tracing_config {
+      mode = "Active"
+    }
 }
 
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {

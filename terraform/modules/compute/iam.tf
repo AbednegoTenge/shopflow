@@ -38,6 +38,11 @@ resource "aws_iam_role_policy" "task_secrets" {
   })
 }
 
+resource "aws_iam_role_policy_attachment" "task_xray" {
+  role       = aws_iam_role.task.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
 data "aws_caller_identity" "current" {}
 
 resource "aws_iam_role_policy" "task_events" {

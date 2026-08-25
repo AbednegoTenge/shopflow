@@ -25,3 +25,7 @@ output "redis_reader_endpoint" {
 output "redis_port" {
   value = 6379
 }
+
+output "rds_instance_id" { 
+  value = aws_db_instance.shopflow.id 
+}

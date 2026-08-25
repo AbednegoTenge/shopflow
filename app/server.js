@@ -3,13 +3,17 @@ const express = require('express');
 const { initDb, getPool } = require('./src/db');
 const { initCache, getCache } = require('./src/cache');
 const routes = require('./src/routes/orderRoutes.js');
+const AWSXRay = require('aws-xray-sdk-core')
+const XRayExpress = require('aws-xray-sdk-express')
 
 const app = express();
 const PORT = 3000;
 
+app.use(XRayExpress.openSegment('ShopFlow'));
 app.use(express.json());
 app.get('/health', (req, res) => res.status(200).send('OK'));
 app.use(routes);
+app.use(XRayExpress.closeSegment());
 
 Promise.all([initDb(), initCache()])
   .then(() => app.listen(PORT, () => console.log(`Server running on ${PORT}`)))

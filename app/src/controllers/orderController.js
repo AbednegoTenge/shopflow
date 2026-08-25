@@ -1,3 +1,4 @@
+const AWSXRay = require('aws-xray-sdk-core')
 const { getPool } = require('../db.js')
 const { getCache } = require('../cache.js')
 const { publishOrderCreated } = require('../events.js')
@@ -6,29 +7,44 @@ const ORDER_CACHE_TTL_SECONDS = 60
 const ORDERS_LIST_CACHE_KEY = 'orders:latest'
 const orderCacheKey = (id) => `order:${id}`
 
+// redis has no built-in xray capture helper (unlike pg/AWS SDK clients),
+// so cache calls are wrapped manually in a subsegment.
 async function cacheGet(key) {
-    try {
-        return await getCache().get(key);
-    } catch (err) {
-        console.error('Cache read failed, falling back to DB:', err);
-        return null;
-    }
+    return AWSXRay.captureAsyncFunc('cache.get', async (subsegment) => {
+        try {
+            const result = await getCache().get(key);
+            subsegment && subsegment.close();
+            return result;
+        } catch (err) {
+            console.error('Cache read failed, falling back to DB:', err);
+            subsegment && subsegment.close(err);
+            return null;
+        }
+    });
 }
 
 async function cacheSet(key, value) {
-    try {
-        await getCache().set(key, JSON.stringify(value), { EX: ORDER_CACHE_TTL_SECONDS });
-    } catch (err) {
-        console.error('Cache write failed:', err);
-    }
+    return AWSXRay.captureAsyncFunc('cache.set', async (subsegment) => {
+        try {
+            await getCache().set(key, JSON.stringify(value), { EX: ORDER_CACHE_TTL_SECONDS });
+            subsegment && subsegment.close();
+        } catch (err) {
+            console.error('Cache write failed:', err);
+            subsegment && subsegment.close(err);
+        }
+    });
 }
 
 async function cacheDel(...keys) {
-    try {
-        await getCache().del(keys);
-    } catch (err) {
-        console.error('Cache invalidation failed:', err);
-    }
+    return AWSXRay.captureAsyncFunc('cache.del', async (subsegment) => {
+        try {
+            await getCache().del(keys);
+            subsegment && subsegment.close();
+        } catch (err) {
+            console.error('Cache invalidation failed:', err);
+            subsegment && subsegment.close(err);
+        }
+    });
 }
 
 const addOrder = async (req, res) => {

@@ -1,5 +1,6 @@
 // src/db.js
-const { Pool } = require('pg');
+const AWSXRay = require('aws-xray-sdk-core');
+const { Pool } = AWSXRay.capturePostgres(require('pg'));
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
 const path = require('path');
 const fs = require('fs');
@@ -7,7 +8,7 @@ const fs = require('fs');
 let pool;
 
 async function initDb() {
-  const sm = new SecretsManagerClient({ region: process.env.AWS_REGION || 'us-east-1' });
+  const sm = AWSXRay.captureAWSv3Client(new SecretsManagerClient({ region: process.env.AWS_REGION || 'us-east-1' }));
   const sec = await sm.send(new GetSecretValueCommand({ SecretId: process.env.SECRET_ARN }));
   const { password, username } = JSON.parse(sec.SecretString);
 

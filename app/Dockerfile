@@ -2,7 +2,8 @@
 FROM node:20-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
 
 # ---- certs: fetch the RDS CA bundle at build time (not committed to git) ----
 FROM node:20-slim AS certs

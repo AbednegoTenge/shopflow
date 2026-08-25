@@ -50,3 +50,14 @@ module "cicd" {
   task_execution_role_arn  = module.compute.task_execution_role_arn
   task_role_arn            = module.compute.task_role_arn
 }
+
+module "observability" {
+  source                  = "../../modules/observability"
+  alb_arn_suffix           = module.compute.alb_arn_suffix
+  target_group_arn_suffix  = module.compute.target_group_arn_suffix
+  ecs_cluster_name         = module.compute.ecs_cluster_name
+  ecs_service_name         = module.compute.ecs_service_name
+  rds_instance_id          = module.data.rds_instance_id
+  dlq_name                 = module.async.dlq_name
+  alert_email              = "abednegotenge180@gmail.com"
+}

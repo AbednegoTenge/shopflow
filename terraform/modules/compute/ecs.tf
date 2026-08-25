@@ -39,6 +39,21 @@ resource "aws_ecs_task_definition" "app" {
                     "awslogs-stream-prefix" = "app"
                 }
             }
+        },
+        {
+            name = "xray-daemon"
+            image = "amazon/aws-xray-daemon:latest"
+            cpu = 32
+            memory = 256
+            portMappings = [{ containerPort = 2000, protocol = "udp" }]
+            logConfiguration = {
+                logDriver = "awslogs"
+                options = {
+                    "awslogs-group" = aws_cloudwatch_log_group.app.name,
+                    "awslogs-region" = "us-east-1",
+                    "awslogs-stream-prefix" = "xray"
+                }
+            }
         }
     ])
 
