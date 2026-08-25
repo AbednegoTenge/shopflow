@@ -1,6 +1,6 @@
 // src/db.js
 const AWSXRay = require('aws-xray-sdk-core');
-const { Pool } = AWSXRay.capturePostgres(require('pg'));
+const { Pool } = require('pg');
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
 const path = require('path');
 const fs = require('fs');
