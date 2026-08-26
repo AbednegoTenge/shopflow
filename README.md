@@ -10,48 +10,8 @@ block the customer-facing response, a CDN + WAF edge so the origin isn't hit dir
 pipeline that deploys without ever touching a long-lived AWS credential.
 
 ## Architecture
+![Uploading shopflow.png…]()
 
-```
-                                   Internet
-                                      │
-                                      ▼
-                         ┌─────────────────────────┐
-                         │   CloudFront + WAFv2     │  Common Rule Set, SQLi rule set,
-                         │  (edge cache + filtering)│  2000 req/5min rate limit
-                         └────────────┬─────────────┘
-                                      │
-                     ┌────────────────┼────────────────┐
-                     ▼                                  ▼
-          ┌─────────────────────┐          ┌─────────────────────────┐
-          │  S3 (static assets) │          │   ALB (public subnets)  │
-          │  OAC + SSE-KMS      │          │   /health target check  │
-          └─────────────────────┘          └────────────┬─────────────┘
-                                                          │
-                                            VPC 10.0.0.0/16, 2 AZs
-                                                          ▼
-                                             ┌─────────────────────────┐
-                                             │   ECS Fargate service   │
-                                             │   (private subnets,     │
-                                             │    ARM64, X-Ray traced) │
-                                             └────────────┬─────────────┘
-                                                          │
-                                   ┌──────────────────────┼──────────────────────┐
-                                   ▼                      ▼                      ▼
-                        ┌───────────────────┐  ┌───────────────────┐  ┌──────────────────┐
-                        │  RDS Postgres      │  │  ElastiCache Redis │  │  EventBridge      │
-                        │  Multi-AZ, t4g.micro│  │  2-node, failover  │  │  → SQS → DLQ      │
-                        └───────────────────┘  └───────────────────┘  └─────────┬──────────┘
-                                                                                  ▼
-                                                                        ┌──────────────────┐
-                                                                        │ Lambda worker     │
-                                                                        │ (ARM64, VPC-attached)│
-                                                                        │ → RDS status flip │
-                                                                        └──────────────────┘
-
-  GitHub Actions ──(OIDC, no stored keys)──▶ ECR push ──▶ ECS deploy ──▶ smoke test
-  GuardDuty · Security Hub · AWS Config · Access Analyzer · VPC Flow Logs (account-wide hardening)
-  CloudWatch dashboards + alarms → SNS → email, X-Ray tracing on ALB + ECS task
-```
 
 **Synchronous path:** client → CloudFront → WAF → ALB → ECS Fargate (Express API) → RDS (write)
 and ElastiCache (cache-aside read, 60s TTL). **Asynchronous path:** after a successful order
